@@ -1,7 +1,29 @@
 # Pitch & Ledger — FCFC
 
-A mobile-first web app for FCFC: game RSVPs, personal wallet, and group balances,
-backed by a small club server so every phone sees the same data.
+FCFC is a ~40-person amateur football club that plays dawn kickoffs (Tue/Thu
+6:30 AM, Sat 7:00 AM) and used to track who's playing and who owes what in a
+spreadsheet, by hand. This is that spreadsheet turned into an app: fixture
+booking with a real confirmed/waitlist queue, a personal wallet, shared-cost
+settle-up, and a full league table — backed by a real server, so everyone's
+phone sees the same data instead of a spreadsheet someone has to update and
+re-circulate.
+
+| Fixtures | Wallet | League table |
+| --- | --- | --- |
+| ![Fixtures screen](docs/screenshots/fixtures.png) | ![Wallet screen](docs/screenshots/wallet.png) | ![League table screen](docs/screenshots/league-table.png) |
+
+## Quick start
+
+```bash
+git clone <this repo>
+cd fcfc-app
+python3 server.py
+```
+
+Open **http://localhost:8090** — that's it. No `npm install`, no build step,
+no external dependencies: the whole thing (server and frontend) runs on
+Python's standard library and plain ES modules. First name you pick logs you
+straight in and asks you to set a PIN for next time.
 
 ## Running it
 
