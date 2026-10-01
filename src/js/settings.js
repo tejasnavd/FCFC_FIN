@@ -6,6 +6,7 @@
 import { initials, inr, emit, resetDevice } from "./utils.js";
 import { popover } from "./popover.js";
 import { logout } from "./auth.js";
+import { act, reportError } from "./api.js";
 
 const THEME_KEY = "fcfc_theme";
 const ROLE_KEY = "fcfc_role";
@@ -61,7 +62,8 @@ export function initSettings() {
   systemDark.addEventListener("change", updateNote);
 
   const pop = popover(chip, panel);
-  // Reset this device: a deliberate two-step action
+  // Reset the demo data on the server: a deliberate two-step action that
+  // affects everyone (it reseeds the database and ends every session).
   const resetOpen = document.getElementById("reset-open");
   const resetBox = document.getElementById("reset-confirm");
   const toggleReset = show => {
@@ -72,11 +74,20 @@ export function initSettings() {
   };
   resetOpen.addEventListener("click", () => toggleReset(true));
   document.getElementById("reset-cancel").addEventListener("click", () => toggleReset(false));
-  document.getElementById("reset-go").addEventListener("click", resetDevice);
+  document.getElementById("reset-go").addEventListener("click", async e => {
+    e.currentTarget.disabled = true;
+    try {
+      await act("/api/admin/reset-all", { confirm: "RESET" });
+      resetDevice();     // also clear this device's preferences and reload
+    } catch (err) {
+      e.currentTarget.disabled = false;
+      reportError(err);
+    }
+  });
 
   document.getElementById("logout-btn").addEventListener("click", () => {
     pop.close(false);
-    logout();   // PINs stay; only this device's session ends
+    logout().catch(reportError);   // PINs stay; only this device's session ends
   });
 
   // Organiser mode: device-local, shows organiser tools. Not a permission.

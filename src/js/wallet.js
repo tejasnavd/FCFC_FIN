@@ -1,10 +1,12 @@
-import { inr, esc, isOrganiser, loadJSON, saveJSON, strArrMap } from "./utils.js";
+import { inr, esc, isOrganiser } from "./utils.js";
 import { addClaim, confirmedPaymentsFor, hasPendingFor } from "./payments.js";
-import { adjustmentsFor, transferExtras, paidViaWallet } from "./admin-store.js";
+import { adjustmentsFor, transferExtras } from "./admin-store.js";
 import { currentUser as me } from "./auth.js";
+import { act, reportError } from "./api.js";
 
-const SETTLED_KEY = "fcfc_extras_settled";   // { [extrasId]: [names] } organiser marks
+// The wallet, extras split and history all come from the server snapshot.
 let D = null;
+let busy = false;
 let extrasOpen = false;
 let extrasNote = "";
 let noteFor = null;         // the note belongs to whoever triggered it
@@ -34,6 +36,8 @@ function chartHtml(name) {
 }
 
 function ledgerRow(a) {
+  if (a.kind === "game") return { t: "Game", d: a.reason };
+  if (a.kind === "guest-fee") return { t: "Guest fee", d: a.reason };
   if (a.kind === "extras-paid") return { t: `Settled: ${a.reason}`, d: `Sent to ${a.counterpart} from your wallet, ${fmtDay(a.at)}` };
   if (a.kind === "extras-received") return { t: `Received: ${a.reason}`, d: `From ${a.counterpart}, ${fmtDay(a.at)}` };
   return { t: "Adjusted by organiser", d: `${a.reason}, ${fmtDay(a.at)}` };
@@ -63,13 +67,13 @@ export function renderWallet(data) {
   // carried into the month, then older dated history
   const live = [
     ...adjustmentsFor(u.name).map(a => ({ ...ledgerRow(a), amt: a.amt, at: a.at })),
-    ...confirmedPaymentsFor(u.name).map(p => ({ t: "Top-up confirmed", d: `Checked by the organiser${p.at ? `, ${fmtDay(p.at)}` : ""}`, amt: p.amt, at: p.at || "2026-09-30" })),
+    ...confirmedPaymentsFor(u.name).map(p => ({ t: "Top-up confirmed", d: `Checked by the organiser${p.at ? `, ${fmtDay(p.at)}` : ""}`, amt: p.amt, at: p.at || "" })),
   ].sort((a, b) => b.at.localeCompare(a.at));
   const older = ((D.walletHistory || {})[u.name] || []).slice().reverse()
     .map(h => ({ t: h.t, d: h.d ? `${h.d}, ${fmtDay(h.date)}` : fmtDay(h.date), amt: h.amt }));
   const history = [
     ...live,
-    { t: "Balance carried forward", d: "Into September", amt: u.openingBalance, carried: true },
+    { t: "Opening balance", d: `When the club server started, ${fmtDay(D.seededAt)}`, amt: u.openingBalance, carried: true },
     ...older,
   ];
   document.getElementById("hist-list").innerHTML = history.map(h => {
@@ -84,7 +88,7 @@ export function renderWallet(data) {
 
   const paid = document.getElementById("paid-btn");
   const waiting = hasPendingFor(u.name);
-  paid.disabled = waiting;
+  paid.disabled = waiting || busy;
   paid.textContent = waiting ? "Waiting for the organiser to confirm" : "I've paid. Tell the organiser";
 
   renderExtras();
@@ -95,11 +99,10 @@ export function renderWallet(data) {
 // payer; organisers can still mark cash settlements by hand.
 function extrasState() {
   const x = D.extras;
-  const viaWallet = paidViaWallet(x.id);
-  const marked = new Set(strArrMap(loadJSON(SETTLED_KEY, null))[x.id] || x.settled);
-  const settled = new Set([...marked, ...viaWallet]);
-  const total = x.items.reduce((s, i) => s + i.amt, 0);
-  const each = Math.ceil(total / x.splitAmong.length);
+  const viaWallet = new Set(x.viaWallet);
+  const settled = new Set(x.settled);
+  const total = x.total;
+  const each = x.each;                 // the server's split, rounded up to the rupee
   const owers = x.splitAmong.filter(n => n !== x.paidBy);
   return { x, viaWallet, settled, total, each, owers, done: owers.filter(n => settled.has(n)).length };
 }
@@ -125,7 +128,7 @@ function renderExtras() {
     yourBlock = `
       <div class="x-you owes">
         <p>You owe ${esc(x.paidBy)} ${inr(each)}.</p>
-        <button type="button" class="pay-btn x-settle" data-settle-wallet>Settle ${inr(each)} from your wallet</button>
+        <button type="button" class="pay-btn x-settle" data-settle-wallet ${busy ? "disabled" : ""}>${busy ? "Sending…" : `Settle ${inr(each)} from your wallet`}</button>
         <p class="x-after${after < 0 ? " neg" : ""}">${after < 0
           ? `This takes your balance to ${inr(after)}. That's fine: top up when you can, like any other game you owe for.`
           : `Your balance after: ${inr(after)}. ${esc(x.paidBy)} gets ${inr(each)} in their wallet.`}</p>
@@ -159,7 +162,7 @@ function renderExtras() {
     <details class="who x-who"${extrasOpen ? " open" : ""}>
       <summary>Who owes what<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
       <ul class="x-list">${rows}</ul>
-      ${org ? `<p class="lg-note">Tap a status to mark a cash settlement. Wallet payments can't be undone here. Saved on this device only.</p>` : ""}
+      ${org ? `<p class="lg-note">Tap a status to mark a cash settlement. Wallet payments can't be undone here.</p>` : ""}
     </details>`;
 }
 
@@ -184,10 +187,11 @@ export function initWalletControls() {
     if (customAmt.value) chipRow.querySelectorAll(".chip").forEach(c => { c.classList.remove("active"); c.setAttribute("aria-pressed", "false"); });
   });
 
-  document.getElementById("paid-btn").addEventListener("click", () => {
+  document.getElementById("paid-btn").addEventListener("click", async () => {
     const u = me();
-    if (!D || !u || !amount()) return;
-    addClaim(u.name, amount());   // re-renders via the change bus
+    if (!D || !u || !amount() || busy) return;
+    busy = true;
+    try { await addClaim(u.name, amount()); } catch (e) { reportError(e); } finally { busy = false; renderWallet(); }
   });
 
   document.getElementById("pay-btn").addEventListener("click", () => {
@@ -197,25 +201,28 @@ export function initWalletControls() {
 
   const extras = document.getElementById("extras");
   extras.addEventListener("toggle", e => { extrasOpen = e.target.open; }, true);
-  extras.addEventListener("click", e => {
+  extras.addEventListener("click", async e => {
+    if (busy) return;
     if (e.target.closest("[data-settle-wallet]")) {
       const u = me();
-      const { x, each, settled } = extrasState();
-      if (!u || settled.has(u.name) || !x.splitAmong.includes(u.name) || x.paidBy === u.name) return;
-      // set the note first: the transfer's change event re-renders synchronously
-      noteFor = u.name;
-      extrasNote = `Sent ${inr(each)} to ${x.paidBy}. It's in both your wallet histories.`;
-      if (!transferExtras({ from: u.name, to: x.paidBy, amt: each, ref: x.id, title: x.title })) { extrasNote = ""; renderExtras(); }
-      return;   // the transfer emits a change; everything re-renders
+      const { x } = extrasState();
+      if (!u) return;
+      busy = true; noteFor = u.name; extrasNote = ""; renderExtras();
+      try {
+        const d = await transferExtras({ ref: x.id });
+        extrasNote = `Sent ${inr(d.sent.amt)} to ${d.sent.to}. It's in both your wallet histories.`;
+      } catch (err) {
+        extrasNote = err.message;
+      } finally {
+        busy = false; renderWallet();
+      }
+      return;
     }
     const b = e.target.closest("[data-settle]");
     if (!b || !isOrganiser()) return;
-    const all = strArrMap(loadJSON(SETTLED_KEY, null));
-    const set = new Set(all[D.extras.id] || D.extras.settled);
     const n = b.dataset.settle;
-    if (set.has(n)) set.delete(n); else set.add(n);
-    all[D.extras.id] = [...set];
-    saveJSON(SETTLED_KEY, all);
+    busy = true;
+    try { await act("/api/admin/extras/mark", { id: D.extras.id, name: n }); } catch (err) { reportError(err); } finally { busy = false; }
     renderExtras();
     const again = document.querySelector(`#extras [data-settle="${CSS.escape(n)}"]`);
     if (again) again.focus({ preventScroll: true });

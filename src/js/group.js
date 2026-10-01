@@ -1,14 +1,14 @@
 import { colorFor, initials, inr, esc, isOrganiser } from "./utils.js";
 import { pendingPayments, confirmPayment } from "./payments.js";
+import { reportError } from "./api.js";
 import { effectiveRoster } from "./admin-store.js";
 import { popover } from "./popover.js";
-import { buildMonthSheets } from "../data/history.js";
 
-const PRICE = 250;
+
 let sortMode = "balance";
-let D = null;            // { roster, recentAttendance, walletHistory }
+let D = null;            // latest server snapshot
 let orgNote = "";
-let sheets = null;       // monthly sheets, newest first
+let sheets = null;       // monthly sheets, newest first (from the server)
 let monthKey = null;     // selected month; defaults to the current one
 const openRows = new Set();
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -36,7 +36,7 @@ function monthGrid(sheet, row) {
   const played = new Set(row.games);
   return `<div class="month-grid" role="list">${sheet.dates.map(d => {
     const on = played.has(d);
-    return `<span class="mg-cell${on ? " on" : ""}" role="listitem" aria-label="${fmtCell(d)}: ${on ? `played, ${inr(PRICE)}` : "didn't play"}"><span class="mg-d">${fmtCell(d)}</span><span class="mg-a">${on ? inr(PRICE) : "·"}</span></span>`;
+    return `<span class="mg-cell${on ? " on" : ""}" role="listitem" aria-label="${fmtCell(d)}: ${on ? `played, ${inr(D.PRICE_PER_HEAD)}` : "didn't play"}"><span class="mg-d">${fmtCell(d)}</span><span class="mg-a">${on ? inr(D.PRICE_PER_HEAD) : "·"}</span></span>`;
   }).join("")}</div>`;
 }
 
@@ -88,17 +88,17 @@ function renderPayments() {
           <button type="button" class="pc-btn" data-confirm="${esc(p.id)}">Received</button>
         </li>`).join("")}</ul>` : `<p class="pc-empty">Nothing waiting. New "I've paid" taps show up here.</p>`}
       <p class="fx-note" role="status">${esc(orgNote)}</p>
-      <p class="lg-note">Check each one against the UPI statement first. Confirming only changes balances on this device.</p>
+      <p class="lg-note">Check each one against the UPI statement first. Confirming credits their balance for everyone.</p>
     </div>`;
 }
 
 export function renderRoster(data) {
   if (data) D = data;
   if (!D) return;
-  if (!sheets) {
-    sheets = buildMonthSheets(D);
+  sheets = D.months;
+  if (!monthKey || !sheets.some(x => x.key === monthKey)) {
     const want = new URLSearchParams(location.search).get("month");   // dev/screenshot convenience
-    monthKey = sheets.some(x => x.key === want) ? want : sheets[0].key;
+    monthKey = sheets.some(x => x.key === want) ? want : (sheets.find(x => x.current) || sheets[0]).key;
   }
   renderPayments();
   const idx = sheets.findIndex(x => x.key === monthKey);
@@ -191,13 +191,20 @@ export function initGroupControls() {
       renderRoster();
     });
   });
-  document.getElementById("org-payments").addEventListener("click", e => {
+  document.getElementById("org-payments").addEventListener("click", async e => {
     const b = e.target.closest("[data-confirm]");
     if (!b) return;
     const p = pendingPayments().find(x => x.id === b.dataset.confirm);
     if (!p) return;
-    const row = withConfirmed().find(r => r[0] === p.name);
-    orgNote = `Confirmed ${p.name}'s ${inr(p.amt)}.${row ? ` Balance now ${inr(row[1] + p.amt)}.` : ""}`;
-    confirmPayment(p.id);    // emits "payments"; app re-renders roster and wallet
+    b.disabled = true;
+    try {
+      await confirmPayment(p.id);
+      const row = withConfirmed().find(r => r[0] === p.name);
+      orgNote = `Confirmed ${p.name}'s ${inr(p.amt)}.${row ? ` Balance now ${inr(row[1])}.` : ""}`;
+    } catch (err) {
+      orgNote = err.message;
+      reportError(err);
+    }
+    renderRoster();
   });
 }

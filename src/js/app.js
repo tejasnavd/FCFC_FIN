@@ -3,10 +3,10 @@ import { renderGames, initGamesControls } from "./games.js";
 import { renderWallet, initWalletControls } from "./wallet.js";
 import { renderRoster, initGroupControls } from "./group.js";
 import { initSettings, renderProfile, restoreRole } from "./settings.js";
-import { setAuthSeed, sessionName, currentUser } from "./auth.js";
+import { sessionName, currentUser, login } from "./auth.js";
 import { initLogin, renderLogin, setupPending, resetLogin, previewStep } from "./login.js";
-import { setSeedPayments } from "./payments.js";
-import { setAdminSeed, resetDemoSettle } from "./admin-store.js";
+import { resetDemoSettle } from "./admin-store.js";
+import { loadState, state, startSync } from "./api.js";
 import { renderAdmin, initAdmin, initialPane, setOpenPlayer } from "./admin.js";
 
 const TAB_ORDER = ["games", "wallet", "group", "admin"];
@@ -64,21 +64,19 @@ function initTabs() {
   return { show, syncRole };
 }
 
-// The single data boundary. Today it's the bundled seed module, loaded with a
-// real dynamic import (a separate network request), so the skeleton state is
-// genuine rather than staged. When a backend exists, replace the import with
-// fetch() calls returning the same shape; nothing else needs to change.
+// The data boundary: one snapshot from the club server (server.py). Every
+// later change arrives the same way, from an action or from syncing.
 async function loadClubData() {
   // Dev-only: ?latency=1500 simulates a slow connection to preview loading.
   const latency = Number(new URLSearchParams(location.search).get("latency")) || 0;
   if (latency) await new Promise(r => setTimeout(r, latency));
-  return import("../data/seed.js");
+  return loadState();
 }
 
 function showLoadError(main) {
   const msg = `
     <div class="load-error" role="alert">
-      <strong>Couldn't load the club's data</strong>
+      <strong>Couldn't reach the club server</strong>
       Check your connection, then try again.
       <div><button type="button" data-reload>Try again</button></div>
     </div>`;
@@ -108,14 +106,18 @@ async function init() {
     return;
   }
 
-  setSeedPayments(data.pendingPayments);
-  setAdminSeed(data);
-  // DEMO-ONLY: restart the Tejas -> Hemant extras settle on every load (see admin-store.js)
-  if (data.extras) resetDemoSettle(data.extras.id, "Tejas");
-  setAuthSeed(data);
+  // DEMO-ONLY: restart the Tejas -> Hemant extras settle on every load
+  // (server.py demo_reset_settle). Remove with the demo scaffolding.
+  try { await resetDemoSettle(); } catch (e) { /* not essential */ }
   initLogin();
   const params = new URLSearchParams(location.search);
   if (params.get("login")) previewStep(params.get("login"), params.get("step"));   // dev/screenshot convenience
+  // Dev/screenshot convenience: ?as=Name logs in as a member whose name has
+  // no PIN yet (exactly what tapping the name does; claimed names still need
+  // their PIN).
+  if (params.get("as") && !state().me) {
+    try { await login(params.get("as")); } catch (e) { console.warn("[app] ?as= login refused:", e.message); }
+  }
 
   // Logged out (or mid PIN setup): show only the login screen.
   let wasOut = null;
@@ -136,16 +138,18 @@ async function init() {
   const renderAll = () => {
     if (applyAuth()) return;
     tabs.syncRole();
-    document.getElementById("price-pill").textContent = `₹${data.PRICE_PER_HEAD} per game`;
+    const S = state();
+    document.getElementById("price-pill").textContent = `₹${S.PRICE_PER_HEAD} per game`;
     renderProfile(currentUser());
-    renderGames(data);
-    renderWallet(data);
-    renderRoster(data);
-    renderAdmin(data);
+    renderGames(S);
+    renderWallet(S);
+    renderRoster(S);
+    renderAdmin(S);
   };
   renderAll();
   // organiser mode, payment confirmations etc. touch more than one tab
   bus.addEventListener("change", renderAll);
+  startSync();      // other devices' changes arrive within ~15s, or on focus
 
 
   // Clear the busy state and play the one arrival moment (squad bars fill).

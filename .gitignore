@@ -2,3 +2,6 @@ _seed_session.html
 *.log
 __pycache__/
 *.db
+*.db-wal
+*.db-shm
+server/*.log

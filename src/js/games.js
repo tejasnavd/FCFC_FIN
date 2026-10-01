@@ -1,82 +1,37 @@
-import { loadJSON, saveJSON, esc, isOrganiser, bus, inr, isObj, asObj, isNum, strArrMap } from "./utils.js";
-import { allFixtures, kindOf, isRemoved } from "./admin-store.js";
-import { allocate, label, promotions, lineupText } from "./booking.js";
+import { esc, isOrganiser, bus, inr } from "./utils.js";
+import { allFixtures } from "./admin-store.js";
+import { label, lineupText } from "./booking.js";
 import { currentUser } from "./auth.js";
+import { act, reportError } from "./api.js";
 
-// Device-local state (moves to the backend along with seed.js later):
-//   bookings: { [name]: { [fixtureId]: { state: "in"|"out"|"none", at, guests } } }
-//             keyed by whoever was logged in, so switching accounts on one
-//             device keeps each person's bookings (and everyone sees them)
-//   dropped:  { [fixtureId]: [names] }   organiser marked as dropped out
-//   attended: { [fixtureId]: [names] }   organiser attendance overrides
-const BOOK_KEY = "fcfc_bookings_by_user";
-const DROP_KEY = "fcfc_dropped";
-const ATT_KEY = "fcfc_attended";
+// Bookings, drops and attendance live on the club server. The server builds
+// each game's queue (members first, then guests, in sign-up order) and
+// returns the CNF / WL chart; this module renders it and sends taps.
 const MAX_GUESTS = 2;
-
-// normalise saved bookings: keep only well-formed { name: { fixtureId: rec } }
-function loadBookings() {
-  const out = {};
-  Object.entries(asObj(loadJSON(BOOK_KEY, null))).forEach(([name, recs]) => {
-    const good = {};
-    Object.entries(asObj(recs)).forEach(([id, r]) => {
-      if (!isObj(r) || !["in", "out", "none"].includes(r.state)) return;
-      if (r.state === "in" && !isNum(r.at)) return;
-      good[id] = { ...r, guests: isNum(r.guests) ? Math.max(0, Math.min(2, r.guests)) : 0 };
-    });
-    out[name] = good;
-  });
-  return out;
-}
-let allBookings = loadBookings();
-let dropped = strArrMap(loadJSON(DROP_KEY, null));
-let attended = strArrMap(loadJSON(ATT_KEY, null));
-let D = null;               // { turfs, GUEST_FEE, ... } from seed
+let D = null;               // latest server snapshot
 let fresh = null;           // fixture id whose stamp should animate
+let pending = null;         // fixture id with a request in flight
 const notes = {};           // transient per-fixture status messages
 const openCharts = new Set();
 
 const turfOf = id => D.turfs.find(t => t.id === id);
 const me = () => (currentUser() || { name: "" }).name;
 
-// Your booking for a fixture: a local record if you've tapped anything,
-// otherwise your sign-up in the seed data (the real sheet) counts as "in".
-function bookingOf(fx, name = me()) {
-  const rec = (allBookings[name] || {})[fx.id];
-  if (rec) return rec.state === "none" ? null : rec;
-  const seeded = fx.signups.find(e => e.name === name && e.kind !== "guest");
-  return seeded ? { state: "in", at: seeded.at, guests: 0, seeded: true } : null;
-}
-function saveBooking(fx, rec) {
-  (allBookings[me()] = allBookings[me()] || {})[fx.id] = rec;
-  saveJSON(BOOK_KEY, allBookings);
-}
+// Your booking for a fixture, as the server has it ("in" / "out").
+const bookingOf = fx => (D.myBookings || {})[fx.id] || null;
 const moves = list => list.map(p => `${p.name} ${p.from} → ${p.to}`).join(", ");
 
-function queueFor(fx) {
-  const gone = new Set(dropped[fx.id] || []);
-  // organiser changes: promoted/demoted players change priority; removed
-  // players are out of every future game
-  const ok = name => !gone.has(name) && !isRemoved(name);
-  const hasLocal = name => Boolean((allBookings[name] || {})[fx.id]);
-  // seed sign-ups, unless that person has a local booking record overriding it
-  const q = fx.signups
-    .map(e => ({ ...e, kind: kindOf(e.name, e.kind), you: e.name === me() && e.kind !== "guest" }))
-    .filter(e => ok(e.name) && !hasLocal(e.name) && !(e.kind === "guest" && e.host && gone.has(e.host)));
-  // everyone who has booked on this device, including the logged-in person
-  Object.keys(allBookings).forEach(name => {
-    const b = allBookings[name][fx.id];
-    if (!b || b.state !== "in" || !ok(name)) return;
-    const you = name === me();
-    q.push({ name, kind: kindOf(name, "member"), at: b.at, you });
-    for (let i = 0; i < (b.guests || 0); i++) {
-      q.push({ name: `${name}'s guest${i ? ` ${i + 1}` : ""}`, kind: "guest", host: name, at: b.at + (i + 1) / 10, yours: you, anon: true });
-    }
-  });
-  return q;
+// The server's chart, with "you" / "your guest" marked for this viewer.
+export function allocFor(fx) {
+  const name = me();
+  const chart = (fx.chart || []).map(e => ({
+    ...e,
+    you: !e.anon && e.kind !== "guest" && e.name === name,
+    yours: Boolean(e.anon && e.host === name),
+  }));
+  const cnf = chart.filter(e => e.tier === "CNF").length;
+  return { chart, capacity: fx.capacity, counts: { CNF: cnf, WL: chart.length - cnf } };
 }
-
-export const allocFor = fx => allocate(queueFor(fx), fx.capacity);
 export const bookingFor = fx => bookingOf(fx);
 
 /* ---------------- rendering ---------------- */
@@ -141,7 +96,7 @@ function chartRows(fx, alloc) {
       <span class="c-who">${who(e)}</span>
       ${org && !e.you && !e.yours ? `<button type="button" class="c-drop" data-drop="${esc(e.name)}" aria-label="Mark ${esc(e.name)} as dropped out">Drop</button>` : ""}
     </li>`).join("");
-  const gone = dropped[fx.id] || [];
+  const gone = fx.dropped || [];
   const undo = org && gone.length
     ? `<p class="c-undo">Dropped: ${gone.map(n => `<button type="button" data-undrop="${esc(n)}">${esc(n)}, undo</button>`).join(" ")}</p>`
     : "";
@@ -236,9 +191,9 @@ function cardHtml(fx) {
 
 function lastGameHtml(fx) {
   const turf = turfOf(fx.turf);
-  const present = new Set(attended[fx.id] || fx.attended || []);
+  const present = new Set(fx.attended || []);
   const org = isOrganiser();
-  const names = fx.signups.map(e => e.name);
+  const names = [...new Set([...fx.signups.map(e => e.name), ...(fx.attended || [])])];
   const chips = names.map(n => {
     const on = present.has(n);
     return org
@@ -253,7 +208,9 @@ function lastGameHtml(fx) {
       </div>
       <div class="att-chips">${chips}</div>
       <p class="lg-note">${org
-        ? "Tap a name to mark them present or absent. Saved on this device only."
+        ? (fx.charged
+          ? "Tap a name to mark them present or absent. Charges follow attendance: un-marking someone refunds them."
+          : "Tap a name to mark them present or absent.")
         : "Faded names booked but didn't turn up."}</p>
     </div>`;
 }
@@ -272,7 +229,7 @@ export function renderGames(data) {
     ? upcoming.map(cardHtml).join("")
     : `<div class="empty-state">No games scheduled yet. Check back soon.</div>`;
 
-  const past = fixtures.filter(f => f.status === "played");
+  const past = fixtures.filter(f => f.status === "played" && !f.cancelled);
   document.getElementById("last-game-wrap").hidden = !past.length;
   document.getElementById("last-game").innerHTML = past.length ? lastGameHtml(past[past.length - 1]) : "";
 
@@ -281,25 +238,12 @@ export function renderGames(data) {
 
 /* ---------------- interaction ---------------- */
 
-function setBooking(fx, choice) {
-  const before = allocFor(fx);
+async function setBooking(fx, choice) {
   const prev = bookingOf(fx);
-  let next;
-  if (prev && prev.state === choice) {
-    next = { state: "none" };                      // tap the same button again to undo
-  } else if (choice === "in") {
-    // someone already on the sheet keeps their original queue position
-    next = { state: "in", at: prev && prev.seeded ? prev.at : Date.now(), guests: 0 };
-  } else {
-    next = { state: "out" };
-  }
-  saveBooking(fx, next);
   notes[fx.id] = "";
-  const wasIn = prev && prev.state === "in";
-  const nowIn = next.state === "in";
-  if (wasIn && !nowIn) {
-    const moved = promotions(before, allocFor(fx));
-    if (moved.length) notes[fx.id] = `Your seat moved people up: ${moves(moved)}.`;
+  const d = await act("/api/rsvp", { fixture: fx.id, choice });
+  if (prev && prev.state === "in" && d.moved && d.moved.length) {
+    notes[fx.id] = `Your seat moved people up: ${moves(d.moved)}.`;
   }
   fresh = fx.id;
 }
@@ -329,43 +273,42 @@ export function initGamesControls() {
   const list = document.getElementById("games-list");
   const fxById = id => D && allFixtures().find(f => f.id === id);
 
-  list.addEventListener("click", e => {
+  list.addEventListener("click", async e => {
     const card = e.target.closest(".fixture");
     if (!card) return;
     const editBtn = e.target.closest("[data-edit]");
     if (editBtn) { bus.dispatchEvent(new CustomEvent("edit-fixture", { detail: editBtn.dataset.edit })); return; }
     const fx = fxById(card.dataset.id);
+    if (!fx) return;
     const choiceBtn = e.target.closest("[data-choice]");
     const guestBtn = e.target.closest("[data-guests]");
     const dropBtn = e.target.closest("[data-drop]");
     const undropBtn = e.target.closest("[data-undrop]");
-
-    if (choiceBtn) {
-      setBooking(fx, choiceBtn.dataset.choice);
-    } else if (guestBtn) {
-      const cur = bookingOf(fx);
-      const b = { ...cur, seeded: undefined };
-      b.guests = Math.max(0, Math.min(MAX_GUESTS, (b.guests || 0) + Number(guestBtn.dataset.guests)));
-      saveBooking(fx, b);
-      const g = allocFor(fx).chart.filter(x => x.yours);
-      notes[fx.id] = g.length
-        ? `Guests queue behind every member: ${g.map(label).join(", ")}. ₹${D.GUEST_FEE} each comes out of your wallet after the game.`
-        : "";
-    } else if (e.target.closest("[data-share]")) {
-      shareLineup(fx);
-      return;
-    } else if (dropBtn) {
-      const before = allocFor(fx);
-      (dropped[fx.id] = dropped[fx.id] || []).push(dropBtn.dataset.drop);
-      const moved = promotions(before, allocFor(fx));
-      notes[fx.id] = `${dropBtn.dataset.drop} dropped out.${moved.length ? ` Moved up: ${moves(moved)}.` : ""}`;
-      saveJSON(DROP_KEY, dropped);
-    } else if (undropBtn) {
-      dropped[fx.id] = (dropped[fx.id] || []).filter(n => n !== undropBtn.dataset.undrop);
-      notes[fx.id] = "";
-      saveJSON(DROP_KEY, dropped);
-    } else {
-      return;
+    if (e.target.closest("[data-share]")) { shareLineup(fx); return; }
+    if (!(choiceBtn || guestBtn || dropBtn || undropBtn)) return;
+    if (pending) return;                      // one request per tap; ignore double-taps
+    pending = fx.id;
+    card.classList.add("is-busy");
+    try {
+      if (choiceBtn) {
+        await setBooking(fx, choiceBtn.dataset.choice);
+      } else if (guestBtn) {
+        await act("/api/guests", { fixture: fx.id, delta: Number(guestBtn.dataset.guests) });
+        const g = allocFor(fxById(fx.id)).chart.filter(x => x.yours);
+        notes[fx.id] = g.length
+          ? `Guests queue behind every member: ${g.map(label).join(", ")}. ₹${D.GUEST_FEE} each comes out of your wallet after the game.`
+          : "";
+      } else if (dropBtn) {
+        const d = await act("/api/admin/drop", { fixture: fx.id, name: dropBtn.dataset.drop });
+        notes[fx.id] = `${dropBtn.dataset.drop} dropped out.${d.moved && d.moved.length ? ` Moved up: ${moves(d.moved)}.` : ""}`;
+      } else if (undropBtn) {
+        await act("/api/admin/undrop", { fixture: fx.id, name: undropBtn.dataset.undrop });
+        notes[fx.id] = "";
+      }
+    } catch (err) {
+      notes[fx.id] = err.message;
+    } finally {
+      pending = null;
     }
     const focusSel = choiceBtn ? `[data-choice="${choiceBtn.dataset.choice}"]`
       : guestBtn ? `[data-guests="${guestBtn.dataset.guests}"]` : "summary";
@@ -381,18 +324,21 @@ export function initGamesControls() {
     if (e.target.open) openCharts.add(card.dataset.id); else openCharts.delete(card.dataset.id);
   }, true);
 
-  document.getElementById("last-game").addEventListener("click", e => {
+  document.getElementById("last-game").addEventListener("click", async e => {
     const chip = e.target.closest("[data-att]");
-    if (!chip || !isOrganiser()) return;
-    const fx = allFixtures().filter(f => f.status === "played").pop();
-    const set = new Set(attended[fx.id] || fx.attended || []);
+    if (!chip || !isOrganiser() || pending) return;
+    const fx = allFixtures().filter(f => f.status === "played" && !f.cancelled).pop();
     const n = chip.dataset.att;
-    if (set.has(n)) set.delete(n); else set.add(n);
-    attended[fx.id] = [...set];
-    saveJSON(ATT_KEY, attended);
+    pending = fx.id;
+    try {
+      await act("/api/admin/attendance", { fixture: fx.id, name: n });
+    } catch (err) {
+      reportError(err);
+    } finally {
+      pending = null;
+    }
     renderGames();
     const again = document.querySelector(`#last-game [data-att="${CSS.escape(n)}"]`);
     if (again) again.focus({ preventScroll: true });
   });
-
 }

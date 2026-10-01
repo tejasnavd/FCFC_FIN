@@ -832,3 +832,15 @@ main.boot-failed { animation: none; }
 .mg-empty { font-size: 12px; opacity: 0.6; margin: 0; }
 .form-grid .repeat-hint { grid-column: 1 / -1; margin: -4px 0 0; }
 .field-l select:disabled { opacity: 0.55; }
+
+/* ================= server feedback ================= */
+.toast {
+  position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%); z-index: 60;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: var(--r-ctl);
+  background: var(--board-900); color: var(--on-board);
+  box-shadow: var(--shadow-raised); font-size: 13px; font-weight: 600; line-height: 1.4;
+}
+.toast[hidden] { display: none; }
+.fixture.is-busy .rsvp-row button, .fixture.is-busy .stepper button { opacity: 0.6; pointer-events: none; }

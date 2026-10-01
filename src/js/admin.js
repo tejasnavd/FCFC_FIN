@@ -1,11 +1,12 @@
 // Organiser tab: Games (host / edit / cancel / duplicate / weekly regulars),
 // Insights, Players. Only shown while organiser mode is on. Everything here
 // writes device-local overlays via admin-store.js.
-import { esc, inr, bus, loadJSON, strArrMap } from "./utils.js";
+import { esc, inr, bus } from "./utils.js";
+import { reportError } from "./api.js";
 import {
   allFixtures, createFixtures, editFixture, cancelFixture, restoreFixture, duplicateFixture,
   scheduleRegulars, REGULARS, addDays, to12, to24, knownGuests, effectiveRoster, kindOf,
-  setKind, isRemoved, setRemoved, addAdjustment, adjustmentsFor,
+  setKind, isRemoved, setRemoved, addAdjustment, adjustmentsFor, markPlayed,
 } from "./admin-store.js";
 import { allocFor } from "./games.js";
 import { pendingPayments, confirmedTotalFor } from "./payments.js";
@@ -80,7 +81,7 @@ function fixtureRow(f) {
   const turf = turfOf(f.turf);
   const alloc = allocFor(f);
   const badges = [
-    f.hosted ? `<span class="tag">Hosted here</span>` : "",
+    f.hosted ? `<span class="tag">Hosted</span>` : "",
     f.series ? `<span class="tag">${f.repeat === "month" ? "Monthly" : "Weekly"}</span>` : "",
     f.cancelled ? `<span class="tag danger">Cancelled</span>` : "",
   ].join("");
@@ -107,6 +108,7 @@ function fixtureRow(f) {
             ? `<button type="button" class="chip-btn" data-restore="${f.id}">Restore game</button>`
             : `<button type="button" class="chip-btn" data-edit-row="${f.id}">Edit</button>
                <button type="button" class="chip-btn" data-dup="${f.id}">Same next week</button>
+               <button type="button" class="chip-btn" data-played="${f.id}">Mark as played</button>
                <button type="button" class="chip-btn danger-t" data-cancel="${f.id}" aria-expanded="${cancelOpenId === f.id}">Cancel game</button>`}
         </div>
         ${cancelForm}
@@ -150,7 +152,8 @@ function insightsHtml() {
     const fees = l.gamesPlayed * t.groundFee;
     return { ...l, label: t.label, fees, cost: fees + l.snacks, net: l.collected - fees - l.snacks };
   });
-  const confirmedHere = roster.reduce((s, r) => s + confirmedTotalFor(r[0]), 0);
+  // top-ups confirmed since the server started aren't split by turf
+  const confirmedHere = D.monthLedger.live ? 0 : roster.reduce((s, r) => s + confirmedTotalFor(r[0]), 0);
   const collected = ledger.reduce((s, l) => s + l.collected, 0) + confirmedHere;
   const cost = ledger.reduce((s, l) => s + l.cost, 0);
   const owing = roster.filter(r => r[1] < 0);
@@ -174,7 +177,7 @@ function insightsHtml() {
   const lastGame = played[played.length - 1];
   let noShow = "";
   if (lastGame) {
-    const marks = strArrMap(loadJSON("fcfc_attended", null))[lastGame.id] || lastGame.attended || [];
+    const marks = lastGame.attended || [];
     const booked = lastGame.signups.map(e => e.name);
     const missed = booked.filter(n => !marks.includes(n));
     const rate = booked.length ? Math.round((missed.length / booked.length) * 100) : 0;
@@ -241,7 +244,7 @@ function insightsHtml() {
 function playerRow(name, meta) {
   const { kind, host, bal } = meta;
   const removed = isRemoved(name);
-  const adj = adjustmentsFor(name);
+  const adj = adjustmentsFor(name).filter(a => a.kind !== "game" && a.kind !== "guest-fee");
   const isOpen = openPlayer === name;
   const tags = [
     kind === "guest" ? `<span class="tag guest">Guest${host ? ` of ${esc(host)}` : ""}</span>` : "",
@@ -333,29 +336,36 @@ export function initAdmin({ showTab }) {
       document.getElementById("repeat-hint").textContent = repeatHint(every, form.elements.date.value);
     }
   });
+  let busy = false;
+  const run = async (fn, onError = e => { formNote = e.message; renderForm(); }) => {
+    if (busy) return;
+    busy = true;
+    try { await fn(); } catch (e) { onError(e); } finally { busy = false; }
+  };
   games.addEventListener("submit", e => {
     e.preventDefault();
     const form = e.target;
     if (form.id === "fixture-form") {
       const { v, error } = readForm(form);
       if (error) { formNote = error; renderForm(); return; }
-      if (editingId) {
-        editFixture(editingId, { turf: v.turf, date: v.date, time: v.time, capacity: v.capacity, price: v.price });
-        formNote = "Saved. Players see the change straight away.";
-        editingId = null;
-      } else {
-        const made = createFixtures(v);
-        formNote = made.length
-          ? `Created ${plural(made.length, "game")}: ${made.map(dayLabel).join(", ")}.`
-          : "Nothing created: there's already a game at that turf and time.";
-      }
-      renderForm();
-      renderGameList();
+      run(async () => {
+        if (editingId) {
+          await editFixture(editingId, { turf: v.turf, date: v.date, time: v.time, capacity: v.capacity, price: v.price });
+          formNote = "Saved. Everyone sees the change straight away.";
+          editingId = null;
+        } else {
+          const made = await createFixtures(v);
+          formNote = made.length
+            ? `Created ${plural(made.length, "game")}: ${made.map(dayLabel).join(", ")}.`
+            : "Nothing created: there's already a game at that turf and time.";
+        }
+        renderForm();
+        renderGameList();
+      });
     } else if (form.dataset.cancelForm) {
       const fd = new FormData(form);
       const reason = fd.get("reason") === "other" ? (fd.get("detail") || "Cancelled by the organiser") : [fd.get("reason"), fd.get("detail")].filter(Boolean).join(". ");
-      cancelOpenId = null;
-      cancelFixture(form.dataset.cancelForm, reason);
+      run(async () => { await cancelFixture(form.dataset.cancelForm, reason); cancelOpenId = null; renderGameList(); }, reportError);
     }
   });
   games.addEventListener("click", e => {
@@ -364,16 +374,27 @@ export function initAdmin({ showTab }) {
     if (t.dataset.stopEdit !== undefined) { editingId = null; formNote = ""; renderForm(); }
     else if (t.dataset.editRow) startEdit(t.dataset.editRow);
     else if (t.dataset.dup) {
-      const made = duplicateFixture(t.dataset.dup);
-      formNote = made.length ? `Added ${dayLabel(made[0])}, same turf, time and price.` : "";
-      renderForm();
+      run(async () => {
+        const made = await duplicateFixture(t.dataset.dup);
+        formNote = made.length ? `Added ${dayLabel(made[0])}, same turf, time and price.` : "";
+        renderForm();
+      });
     } else if (t.dataset.cancel) { cancelOpenId = cancelOpenId === t.dataset.cancel ? null : t.dataset.cancel; renderGameList(); }
     else if (t.dataset.keep) { cancelOpenId = null; renderGameList(); }
-    else if (t.dataset.restore) restoreFixture(t.dataset.restore);
+    else if (t.dataset.restore) run(() => restoreFixture(t.dataset.restore), reportError);
+    else if (t.dataset.played) {
+      run(async () => {
+        await markPlayed(t.dataset.played);
+        formNote = "Marked as played. Everyone in CNF is charged; fix attendance under Last game on the Fixtures tab.";
+        renderForm();
+      });
+    }
     else if (t.dataset.regulars !== undefined) {
-      const made = scheduleRegulars();
-      formNote = made.length ? `Added ${made.map(dayLabel).join(", ")} at SUFC turf.` : "That week is already scheduled.";
-      renderForm();
+      run(async () => {
+        const made = await scheduleRegulars();
+        formNote = made.length ? `Added ${made.map(dayLabel).join(", ")} at SUFC turf.` : "That week is already scheduled.";
+        renderForm();
+      });
     }
   });
 
@@ -402,9 +423,9 @@ export function initAdmin({ showTab }) {
     const row = e.target.closest(".pl-row");
     if (!t || !row) return;
     const name = row.dataset.player;
-    if (t.dataset.kind) setKind(name, t.dataset.kind);
-    else if (t.dataset.removed) setRemoved(name, t.dataset.removed === "1");
-    else if (t.dataset.resetPin !== undefined) resetPin(name);
+    if (t.dataset.kind) run(() => setKind(name, t.dataset.kind), reportError);
+    else if (t.dataset.removed) run(() => setRemoved(name, t.dataset.removed === "1"), reportError);
+    else if (t.dataset.resetPin !== undefined) run(() => resetPin(name), reportError);
   });
   players.addEventListener("submit", e => {
     e.preventDefault();
@@ -417,7 +438,7 @@ export function initAdmin({ showTab }) {
       form.querySelector(amt ? '[name="reason"]' : '[name="amt"]').focus();
       return;
     }
-    addAdjustment(form.dataset.adjust, amt, reason);
+    run(() => addAdjustment(form.dataset.adjust, amt, reason), reportError);
   });
 }
 

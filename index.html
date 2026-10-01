@@ -28,21 +28,20 @@
   <script type="importmap">
   {
     "imports": {
-      "./src/js/app.js": "./src/js/app.js?v=2026-09-30.9",
-      "./src/js/admin.js": "./src/js/admin.js?v=2026-09-30.9",
-      "./src/js/admin-store.js": "./src/js/admin-store.js?v=2026-09-30.9",
-      "./src/js/auth.js": "./src/js/auth.js?v=2026-09-30.9",
-      "./src/js/booking.js": "./src/js/booking.js?v=2026-09-30.9",
-      "./src/js/games.js": "./src/js/games.js?v=2026-09-30.9",
-      "./src/js/group.js": "./src/js/group.js?v=2026-09-30.9",
-      "./src/js/login.js": "./src/js/login.js?v=2026-09-30.9",
-      "./src/js/payments.js": "./src/js/payments.js?v=2026-09-30.9",
-      "./src/js/popover.js": "./src/js/popover.js?v=2026-09-30.9",
-      "./src/js/settings.js": "./src/js/settings.js?v=2026-09-30.9",
-      "./src/js/utils.js": "./src/js/utils.js?v=2026-09-30.9",
-      "./src/js/wallet.js": "./src/js/wallet.js?v=2026-09-30.9",
-      "./src/data/seed.js": "./src/data/seed.js?v=2026-09-30.9",
-      "./src/data/history.js": "./src/data/history.js?v=2026-09-30.9"
+      "./src/js/app.js": "./src/js/app.js?v=2026-10-01.1",
+      "./src/js/admin.js": "./src/js/admin.js?v=2026-10-01.1",
+      "./src/js/admin-store.js": "./src/js/admin-store.js?v=2026-10-01.1",
+      "./src/js/auth.js": "./src/js/auth.js?v=2026-10-01.1",
+      "./src/js/booking.js": "./src/js/booking.js?v=2026-10-01.1",
+      "./src/js/games.js": "./src/js/games.js?v=2026-10-01.1",
+      "./src/js/group.js": "./src/js/group.js?v=2026-10-01.1",
+      "./src/js/login.js": "./src/js/login.js?v=2026-10-01.1",
+      "./src/js/payments.js": "./src/js/payments.js?v=2026-10-01.1",
+      "./src/js/popover.js": "./src/js/popover.js?v=2026-10-01.1",
+      "./src/js/settings.js": "./src/js/settings.js?v=2026-10-01.1",
+      "./src/js/utils.js": "./src/js/utils.js?v=2026-10-01.1",
+      "./src/js/wallet.js": "./src/js/wallet.js?v=2026-10-01.1",
+      "./src/js/api.js": "./src/js/api.js?v=2026-10-01.1"
     }
   }
   </script>
@@ -102,15 +101,15 @@
               <input type="checkbox" id="org-toggle" role="switch">
               <span class="switch" aria-hidden="true"></span>
             </label>
-            <p class="settings-note">Only changes this device, for whoever is using it. Logins aren't verified by a server yet, so this isn't a real permission. It shows tools for marking attendance, dropping players and confirming payments.</p>
+            <p class="settings-note">Shows the Organiser tab on this device. The tools change the club's real data for everyone. Anyone logged in can use them for now; limiting them to named organisers is still to do.</p>
           </fieldset>
           <fieldset class="settings-group">
-            <legend>This device</legend>
-            <button type="button" class="chip-btn danger-t" id="reset-open" aria-expanded="false" aria-controls="reset-confirm">Reset this device…</button>
+            <legend>Demo data</legend>
+            <button type="button" class="chip-btn danger-t" id="reset-open" aria-expanded="false" aria-controls="reset-confirm">Reset all demo data…</button>
             <div class="reset-confirm" id="reset-confirm" hidden>
-              <p>This erases everything the app has saved on this device: your login and every PIN, all bookings and guests, organiser changes, confirmed payments and settings. It can't be undone. Nothing on other devices is affected.</p>
+              <p>This puts the club server back to its starting data, for everyone: every booking, guest, PIN, payment, balance change and organiser edit since then is erased, and everyone is logged out. It can't be undone.</p>
               <div class="row-actions">
-                <button type="button" class="danger-btn" id="reset-go">Erase and restart</button>
+                <button type="button" class="danger-btn" id="reset-go">Reset for everyone</button>
                 <button type="button" class="link-btn" id="reset-cancel">Cancel</button>
               </div>
             </div>
@@ -132,7 +131,7 @@
       <main aria-busy="true">
         <div class="boot-error card-block" id="boot-error" role="alert" hidden>
           <strong>The app couldn't start.</strong>
-          <p>This usually happens after an update, when this device still has saved data or files from an older version of the app. Try reloading first. If that doesn't help, resetting this device clears the saved data and starts fresh.</p>
+          <p>This usually means the club server isn't reachable, or this device has files from an older version. Try reloading first. Resetting this device clears only its saved preferences; club data stays on the server.</p>
           <div class="row-actions">
             <button type="button" class="chip-btn strong" id="boot-reload">Reload</button>
             <button type="button" class="chip-btn danger-t" id="boot-reset">Reset this device</button>
@@ -196,7 +195,7 @@
         <section class="tab" id="tab-admin" aria-label="Organiser tools">
           <div class="admin-banner">
             <strong>Organiser tools</strong>
-            <span>Changes are saved on this device only. Logins aren't verified by a server yet, so this isn't a real permission.</span>
+            <span>These tools change the club's real data for everyone. Anyone logged in can use them for now: limiting them to named organisers is still to do.</span>
           </div>
           <div class="segmented admin-nav" id="admin-nav" role="radiogroup" aria-label="Organiser section">
             <label><input type="radio" name="admin-pane" value="games" checked><span>Games</span></label>
@@ -303,12 +302,13 @@
       setTimeout(function () { if (booting()) fail("timed out"); }, 12000);
       document.getElementById("boot-reload").onclick = function () { location.reload(); };
       document.getElementById("boot-reset").onclick = function () {
-        if (!confirm("Erase everything this app saved on this device (login, PINs, bookings, organiser changes) and start fresh?")) return;
+        if (!confirm("Clear this app's saved preferences on this device (theme, last tab, organiser view) and reload? Club data on the server is not affected.")) return;
         try { Object.keys(localStorage).filter(function (k) { return k.indexOf("fcfc_") === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
         location.href = location.pathname;
       };
     })();
   </script>
-  <script type="module" src="./src/js/app.js?v=2026-09-30.9"></script>
+  <div class="toast" id="toast" role="alert" hidden></div>
+  <script type="module" src="./src/js/app.js?v=2026-10-01.1"></script>
 </body>
 </html>
