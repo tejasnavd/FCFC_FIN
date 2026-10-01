@@ -126,9 +126,13 @@ src/js/settings.js         profile, theme, organiser mode, demo reset
 
 ## Real vs synthesized data
 
-`server/seed.json` keeps the app's starting data. Real (from the club sheet):
-roster names and balances, September games-played counts, the three SUFC
-fixtures and their sign-ups, the UPI id. Synthesized placeholders: Turf B/C and
+`server/seed.json` keeps the app's starting data. Names are real, but every
+member's financial identity (balance, games played, monthly sheet rows, last-5
+attendance, wallet history) has been moved as one intact block to a different,
+randomly chosen member, so no name shows its owner's real money. Each block
+still adds up on its own; the mapping was never stored. The three SUFC
+fixtures and their sign-ups are as-is (real); the UPI id is a placeholder
+(`fcfc-club@upi`), not the club's real one. Synthesized placeholders: Turf B/C and
 their games, guest sign-ups, the 24 Sep played game, last-5 attendance, extras,
 pending payments, the month ledger, Tejas's wallet history, and the monthly
 sheets from July 2025. Everything that happens on the server from now on is
