@@ -1,0 +1,4 @@
+_seed_session.html
+*.log
+__pycache__/
+*.db

@@ -1,0 +1,168 @@
+/* "Floodlight" palette — a dawn-kickoff stadium scoreboard, not a SaaS theme.
+
+   Two token roles that used to share one colour are now split:
+   - "board" = the painted scoreboard surfaces (header, tab bar, wallet tile,
+     table head). Dark in both themes — a tote board is a tote board.
+   - "ink" / "paper" = text and the content surfaces. These flip with theme.
+
+   Matte finish: accents are low-chroma (chalk / flat enamel, not neon),
+   shadows are soft, layered and tinted (never pure grey), and dark boards
+   carry a faint grain.
+
+   Theme resolution (inline script in index.html + settings.js):
+     - no saved choice: data-theme="light"
+     - explicit Light / Dark: data-theme="light" / "dark"
+     - explicit System: no data-theme, so the OS preference below applies */
+:root {
+  color-scheme: light;
+
+  /* ---- board ---- */
+  --board-950: #161A27;
+  --board-900: #1C2130;
+  --board-800: #242A3B;
+  --on-board: #EEE9DA;
+  --line-on-ink: rgba(236, 230, 212, 0.10);
+  --board-edge: inset 0 1px 0 rgba(236, 230, 212, 0.06);
+
+  /* dark text used ON accent fills (lime, pastel avatars) — both themes */
+  --on-accent: #161A27;
+
+  /* ---- ink (text) ---- */
+  --ink-950: #161A27;
+  --ink-900: #1C2130;
+
+  /* ---- paper (content surfaces) ----
+     50 = raised cards, 100 = page / recessed wells, 200 = deeper tracks,
+     300 = perforation dots */
+  --paper-50:  #F8F5EC;
+  --paper-100: #EFEADC;
+  --paper-200: #E3DCC8;
+  --paper-300: #D6CEB6;
+  --well-hover: #E6E0CD;
+
+  --floodlight-400: #C9E26A;  /* the one loud accent — chalked turf lime */
+  --floodlight-300: #DDEBA3;
+
+  --kit-blue-500: #4757C4;    /* text / thin marks */
+  --kit-fill: #4757C4;        /* button fill, light text on it */
+  --kit-fill-hover: #3A48A6;
+
+  --terrace-pink-500: #CF5A7E; /* owes-money / alert — dusty terrace rose */
+  --terrace-pink-100: #F3DCE2;
+  --terrace-pink-ink: #9E3A5A;
+
+  --pitch-green-600: #3C8A63;  /* in-credit — mown-pitch green */
+  --pitch-green-100: #DCEBDF;
+
+  --hair: rgba(22, 26, 39, 0.10);
+  --edge-hi: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --shadow-rest:
+    0 1px 1px rgba(22, 26, 39, 0.05),
+    0 3px 8px -2px rgba(22, 26, 39, 0.08),
+    0 16px 30px -14px rgba(22, 26, 39, 0.22);
+  --shadow-raised:
+    0 1px 2px rgba(22, 26, 39, 0.08),
+    0 8px 18px -6px rgba(22, 26, 39, 0.20),
+    0 26px 44px -20px rgba(22, 26, 39, 0.38);
+  --shadow-low:
+    0 1px 1px rgba(22, 26, 39, 0.05),
+    0 2px 5px -1px rgba(22, 26, 39, 0.08);
+  --shadow-chrome: rgba(22, 26, 39, 0.5);
+  --well: inset 0 1px 2px rgba(22, 26, 39, 0.09), inset 0 0 0 1px var(--hair);
+  --track-inset: inset 0 1px 2px rgba(22, 26, 39, 0.14);
+
+  --sk: rgba(22, 26, 39, 0.08);   /* skeleton blocks on paper */
+
+  --r-slab: 20px;   /* scoreboard slabs */
+  --r-stub: 14px;   /* ticket stubs, tables, panels */
+  --r-ctl: 10px;    /* buttons, inputs, chips */
+
+  /* matte grain — light noise for dark boards; paper tooth per theme */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .09 0 0 0 0 .1 0 0 0 0 .15 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  --ease-soft: cubic-bezier(.3, .7, .3, 1);
+}
+
+/* ---- dark: "floodlit night" ----
+   Paper becomes warm charcoal (clubhouse chalkboard, not pure black). Cards
+   get LIGHTER as they rise and wells stay darker than their card, so the
+   cardstock / pressed-rubber logic survives. The board goes a step deeper
+   and bluer, with a hairline edge, so it still reads as a separate painted
+   object on the charcoal. Accents are lifted in lightness but kept low in
+   chroma so they sit matte on the dark ground instead of glowing.
+   (Declared twice — OS preference, and explicit data-theme — because CSS
+   can't share one block between a media query and an attribute selector.) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --board-950: #10131C;
+    --board-900: #151925;
+    --board-800: #202535;
+    --line-on-ink: rgba(236, 230, 212, 0.09);
+    --board-edge: inset 0 0 0 1px rgba(236, 230, 212, 0.07);
+    --ink-950: #ECE6D6;
+    --ink-900: #E2DCCA;
+    --paper-50:  #292722;
+    --paper-100: #1E1D19;
+    --paper-200: #181714;
+    --paper-300: #4A473D;
+    --well-hover: #25231F;
+    --floodlight-400: #C2D86C;
+    --floodlight-300: #D3E2A0;
+    --kit-blue-500: #99A4E8;
+    --kit-fill: #5260C2;
+    --kit-fill-hover: #5D6BCF;
+    --terrace-pink-500: #E48CA6;
+    --terrace-pink-100: #3A2329;
+    --terrace-pink-ink: #F0B4C5;
+    --pitch-green-600: #82C39E;
+    --pitch-green-100: #1E2E25;
+    --hair: rgba(236, 230, 212, 0.08);
+    --edge-hi: inset 0 1px 0 rgba(236, 230, 212, 0.05);
+    --shadow-rest: 0 1px 1px rgba(0, 0, 0, 0.25), 0 4px 10px -2px rgba(0, 0, 0, 0.30), 0 16px 30px -14px rgba(0, 0, 0, 0.55);
+    --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 18px -6px rgba(0, 0, 0, 0.45), 0 26px 44px -20px rgba(0, 0, 0, 0.7);
+    --shadow-low: 0 1px 1px rgba(0, 0, 0, 0.25), 0 2px 5px -1px rgba(0, 0, 0, 0.3);
+    --shadow-chrome: rgba(0, 0, 0, 0.7);
+    --well: inset 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--hair);
+    --track-inset: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+    --sk: rgba(236, 230, 212, 0.07);
+    --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 .95 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --board-950: #10131C;
+  --board-900: #151925;
+  --board-800: #202535;
+  --line-on-ink: rgba(236, 230, 212, 0.09);
+  --board-edge: inset 0 0 0 1px rgba(236, 230, 212, 0.07);
+  --ink-950: #ECE6D6;
+  --ink-900: #E2DCCA;
+  --paper-50:  #292722;
+  --paper-100: #1E1D19;
+  --paper-200: #181714;
+  --paper-300: #4A473D;
+  --well-hover: #25231F;
+  --floodlight-400: #C2D86C;
+  --floodlight-300: #D3E2A0;
+  --kit-blue-500: #99A4E8;
+  --kit-fill: #5260C2;
+  --kit-fill-hover: #5D6BCF;
+  --terrace-pink-500: #E48CA6;
+  --terrace-pink-100: #3A2329;
+  --terrace-pink-ink: #F0B4C5;
+  --pitch-green-600: #82C39E;
+  --pitch-green-100: #1E2E25;
+  --hair: rgba(236, 230, 212, 0.08);
+  --edge-hi: inset 0 1px 0 rgba(236, 230, 212, 0.05);
+  --shadow-rest: 0 1px 1px rgba(0, 0, 0, 0.25), 0 4px 10px -2px rgba(0, 0, 0, 0.30), 0 16px 30px -14px rgba(0, 0, 0, 0.55);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 18px -6px rgba(0, 0, 0, 0.45), 0 26px 44px -20px rgba(0, 0, 0, 0.7);
+  --shadow-low: 0 1px 1px rgba(0, 0, 0, 0.25), 0 2px 5px -1px rgba(0, 0, 0, 0.3);
+  --shadow-chrome: rgba(0, 0, 0, 0.7);
+  --well: inset 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--hair);
+  --track-inset: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  --sk: rgba(236, 230, 212, 0.07);
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 .95 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}

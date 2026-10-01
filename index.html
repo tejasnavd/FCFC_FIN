@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FCFC Scoreboard</title>
+  <meta name="theme-color" content="#161A27">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    /* Apply an explicit theme before first paint so there's no flash.
+       ?theme=dark|light|system previews without saving; otherwise the saved
+       choice wins; with no saved choice the app is light. Only an explicit
+       "system" choice follows the OS preference. */
+    (function () {
+      try {
+        var q = new URLSearchParams(location.search).get("theme");
+        var t = (q === "dark" || q === "light" || q === "system") ? q : localStorage.getItem("fcfc_theme");
+        // no choice made yet (fresh or reset device): default to light.
+        // "system" is only used when someone explicitly picks it.
+        if (t !== "dark" && t !== "system") t = "light";
+        if (t !== "system") document.documentElement.dataset.theme = t;
+      } catch (e) { document.documentElement.dataset.theme = "light"; }
+    })();
+  </script>
+  <!-- Every module is fetched at one version, so the browser can never mix a
+       stale cached module with fresh ones (the dev server sends no cache
+       headers). Bump APP_VERSION here, and on app.js below, after any code change. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./src/js/app.js": "./src/js/app.js?v=2026-09-30.9",
+      "./src/js/admin.js": "./src/js/admin.js?v=2026-09-30.9",
+      "./src/js/admin-store.js": "./src/js/admin-store.js?v=2026-09-30.9",
+      "./src/js/auth.js": "./src/js/auth.js?v=2026-09-30.9",
+      "./src/js/booking.js": "./src/js/booking.js?v=2026-09-30.9",
+      "./src/js/games.js": "./src/js/games.js?v=2026-09-30.9",
+      "./src/js/group.js": "./src/js/group.js?v=2026-09-30.9",
+      "./src/js/login.js": "./src/js/login.js?v=2026-09-30.9",
+      "./src/js/payments.js": "./src/js/payments.js?v=2026-09-30.9",
+      "./src/js/popover.js": "./src/js/popover.js?v=2026-09-30.9",
+      "./src/js/settings.js": "./src/js/settings.js?v=2026-09-30.9",
+      "./src/js/utils.js": "./src/js/utils.js?v=2026-09-30.9",
+      "./src/js/wallet.js": "./src/js/wallet.js?v=2026-09-30.9",
+      "./src/data/seed.js": "./src/data/seed.js?v=2026-09-30.9",
+      "./src/data/history.js": "./src/data/history.js?v=2026-09-30.9"
+    }
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Archivo:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/styles/tokens.css">
+  <link rel="stylesheet" href="./src/styles/layout.css">
+  <link rel="stylesheet" href="./src/styles/components.css">
+</head>
+<body>
+  <div class="field">
+    <div class="app">
+      <!-- EXPERIMENT: data-ticker="static" swaps the scrolling ticker for a
+           fixed schedule line. To revert, delete data-ticker="static". -->
+      <header class="scoreboard-header" data-ticker="static">
+        <div class="sb-top">
+          <div class="sb-brand">
+          <div class="crest-sticker" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7l-9-5Z" fill="currentColor"/><path d="M12 6.2 9 11l3 2 3-2-3-4.8Z" fill="var(--on-accent)"/></svg>
+          </div>
+          <h1 class="club-name">FCFC</h1>
+          </div>
+          <div class="price-pill" id="price-pill">₹250 per game</div>
+          <button class="me-chip" id="me-chip" type="button" aria-expanded="false" aria-controls="settings" aria-haspopup="dialog">
+            <span class="me-avatar" id="me-avatar" aria-hidden="true"></span>
+            <span class="me-name" id="me-name"></span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="settings" id="settings" role="dialog" aria-label="Profile and settings" tabindex="-1" hidden>
+          <div class="settings-profile">
+            <div class="avatar-lg" id="settings-avatar" aria-hidden="true"></div>
+            <div class="p-text">
+              <div class="p-name" id="settings-name"></div>
+              <div class="p-sub" id="settings-sub">FCFC member</div>
+            </div>
+            <button type="button" class="chip-btn" id="logout-btn">Log out</button>
+          </div>
+          <fieldset class="settings-group">
+            <legend>Appearance</legend>
+            <div class="segmented">
+              <label><input type="radio" name="theme" value="system"><span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 17v4"/></svg>System</span></label>
+              <label><input type="radio" name="theme" value="light"><span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</span></label>
+              <label><input type="radio" name="theme" value="dark"><span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>Dark</span></label>
+            </div>
+            <p class="settings-note" id="theme-note">Following your device's setting.</p>
+          </fieldset>
+          <fieldset class="settings-group">
+            <legend>Organiser mode</legend>
+            <label class="switch-row">
+              <span>Show organiser tools</span>
+              <input type="checkbox" id="org-toggle" role="switch">
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+            <p class="settings-note">Only changes this device, for whoever is using it. Logins aren't verified by a server yet, so this isn't a real permission. It shows tools for marking attendance, dropping players and confirming payments.</p>
+          </fieldset>
+          <fieldset class="settings-group">
+            <legend>This device</legend>
+            <button type="button" class="chip-btn danger-t" id="reset-open" aria-expanded="false" aria-controls="reset-confirm">Reset this device…</button>
+            <div class="reset-confirm" id="reset-confirm" hidden>
+              <p>This erases everything the app has saved on this device: your login and every PIN, all bookings and guests, organiser changes, confirmed payments and settings. It can't be undone. Nothing on other devices is affected.</p>
+              <div class="row-actions">
+                <button type="button" class="danger-btn" id="reset-go">Erase and restart</button>
+                <button type="button" class="link-btn" id="reset-cancel">Cancel</button>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+        <div class="marquee" role="note" aria-label="Fixture schedule">
+          <p class="ticker-static">SAT 7:00 AM&nbsp;&nbsp;●&nbsp;&nbsp;TUE 6:30 AM&nbsp;&nbsp;●&nbsp;&nbsp;THU 6:30 AM</p>
+          <div class="marquee-track">
+            <span>SAT 7:00 AM&nbsp;&nbsp;●&nbsp;&nbsp;TUE 6:30 AM&nbsp;&nbsp;●&nbsp;&nbsp;THU 6:30 AM&nbsp;&nbsp;●&nbsp;&nbsp;SUFC TURF&nbsp;&nbsp;●&nbsp;&nbsp;DAWN KICKOFFS ONLY&nbsp;&nbsp;●&nbsp;&nbsp;</span>
+            <span aria-hidden="true">SAT 7:00 AM&nbsp;&nbsp;●&nbsp;&nbsp;TUE 6:30 AM&nbsp;&nbsp;●&nbsp;&nbsp;THU 6:30 AM&nbsp;&nbsp;●&nbsp;&nbsp;SUFC TURF&nbsp;&nbsp;●&nbsp;&nbsp;DAWN KICKOFFS ONLY&nbsp;&nbsp;●&nbsp;&nbsp;</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="login" class="login" aria-labelledby="login-title" hidden>
+        <div id="login-body"></div>
+      </section>
+
+      <main aria-busy="true">
+        <div class="boot-error card-block" id="boot-error" role="alert" hidden>
+          <strong>The app couldn't start.</strong>
+          <p>This usually happens after an update, when this device still has saved data or files from an older version of the app. Try reloading first. If that doesn't help, resetting this device clears the saved data and starts fresh.</p>
+          <div class="row-actions">
+            <button type="button" class="chip-btn strong" id="boot-reload">Reload</button>
+            <button type="button" class="chip-btn danger-t" id="boot-reset">Reset this device</button>
+          </div>
+        </div>
+        <section class="tab active" id="tab-games">
+          <h2 class="section">Upcoming fixtures</h2>
+          <div id="games-list">
+            <div class="fixture is-skeleton" aria-hidden="true">
+              <div class="fx-date"><span class="sk w45" style="width:26px"></span><span class="sk tall"></span><span class="sk" style="width:24px"></span></div>
+              <div class="fx-body"><span class="sk w45"></span><span class="sk w30"></span><span class="sk" style="margin-top:16px;height:8px"></span><div class="sk-row"><span class="sk btn"></span><span class="sk btn"></span></div></div>
+              <div class="notch-bottom"></div>
+            </div>
+            <div class="fixture is-skeleton" aria-hidden="true">
+              <div class="fx-date"><span class="sk w45" style="width:26px"></span><span class="sk tall"></span><span class="sk" style="width:24px"></span></div>
+              <div class="fx-body"><span class="sk w45"></span><span class="sk w30"></span><span class="sk" style="margin-top:16px;height:8px"></span><div class="sk-row"><span class="sk btn"></span><span class="sk btn"></span></div></div>
+              <div class="notch-bottom"></div>
+            </div>
+          </div>
+          <div id="last-game-wrap" hidden>
+            <h2 class="section">Last game</h2>
+            <div id="last-game"></div>
+          </div>
+        </section>
+
+        <section class="tab" id="tab-wallet">
+          <h2 class="section" style="margin-top:2px;">Your balance</h2>
+          <div class="sb-tile">
+            <div class="sb-label">Available balance</div>
+            <div class="sb-amount" id="wallet-amount">₹0</div>
+            <div class="sb-sub" id="wallet-sub"></div>
+            <div class="bar-spark" id="bar-spark" role="group" aria-label="Your recent payments"></div>
+            <div class="spark-cap" id="spark-cap">Your last payments. Hover or tap a bar for the date.</div>
+          </div>
+
+          <div class="card-block">
+            <h2 class="section" style="margin:0 0 2px;">Top up</h2>
+            <div class="chip-row" id="chip-row">
+              <button type="button" class="chip" data-amt="500" aria-pressed="false">₹500</button>
+              <button type="button" class="chip active" data-amt="1000" aria-pressed="true">₹1,000</button>
+              <button type="button" class="chip" data-amt="2000" aria-pressed="false">₹2,000</button>
+            </div>
+            <input class="custom-amt" id="custom-amt" placeholder="Or another amount in ₹" inputmode="numeric">
+            <button class="pay-btn" id="pay-btn">Pay by UPI app</button>
+            <div class="upi-note">Paying to <span class="upi-id" id="upi-id">fcfc-club@upi</span>. If the button doesn't open your UPI app, pay this ID from GPay or PhonePe.</div>
+            <button class="paid-btn" id="paid-btn">I've paid. Tell the organiser</button>
+          </div>
+
+          <h2 class="section">Shared extras</h2>
+          <div class="card-block extras" id="extras" style="margin-top:0"></div>
+
+          <h2 class="section">History</h2>
+          <div class="card-block" style="padding:4px 16px;">
+            <div id="hist-list">
+              <div class="sk-hist" aria-hidden="true"><span class="sk" style="width:5px;height:30px"></span><div style="flex:1"><span class="sk w60"></span><span class="sk w30"></span></div><span class="sk" style="width:50px"></span></div>
+              <div class="sk-hist" aria-hidden="true"><span class="sk" style="width:5px;height:30px"></span><div style="flex:1"><span class="sk w45"></span><span class="sk w30"></span></div><span class="sk" style="width:50px"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab" id="tab-admin" aria-label="Organiser tools">
+          <div class="admin-banner">
+            <strong>Organiser tools</strong>
+            <span>Changes are saved on this device only. Logins aren't verified by a server yet, so this isn't a real permission.</span>
+          </div>
+          <div class="segmented admin-nav" id="admin-nav" role="radiogroup" aria-label="Organiser section">
+            <label><input type="radio" name="admin-pane" value="games" checked><span>Games</span></label>
+            <label><input type="radio" name="admin-pane" value="insights"><span>Insights</span></label>
+            <label><input type="radio" name="admin-pane" value="players"><span>Players</span></label>
+          </div>
+          <div class="admin-pane" id="admin-games">
+            <div id="game-form"></div>
+            <div id="admin-fx"></div>
+          </div>
+          <div class="admin-pane" id="admin-insights" hidden></div>
+          <div class="admin-pane" id="admin-players" hidden>
+            <div class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="player-search" placeholder="Search players…" aria-label="Search players">
+            </div>
+            <div id="admin-player-list"></div>
+          </div>
+        </section>
+
+        <section class="tab" id="tab-group">
+          <div id="org-payments" hidden></div>
+          <div class="section-row">
+            <h2 class="section">League table</h2>
+            <div class="picker">
+              <button class="pick-btn" id="month-btn" type="button" aria-expanded="false" aria-controls="month-panel" aria-haspopup="dialog">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+                <span id="month-btn-label">This month</span>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div class="settings popover pick-panel" id="month-panel" role="dialog" aria-label="Choose a month" tabindex="-1" hidden>
+                <fieldset class="settings-group">
+                  <legend>Show the table for</legend>
+                  <div class="opt-list" id="month-options"></div>
+                </fieldset>
+              </div>
+            </div>
+          </div>
+          <div class="stat-strip">
+            <div class="stat owe"><div class="v" id="stat-owe-count">0</div><div class="l">Owe money</div></div>
+            <div class="stat"><div class="v" id="stat-total-owed">₹0</div><div class="l">Total owed</div></div>
+            <div class="stat credit"><div class="v" id="stat-total-credit">₹0</div><div class="l">In credit</div></div>
+          </div>
+          <p class="month-note" id="month-note"></p>
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="member-search" placeholder="Search a member…">
+          </div>
+          <div class="sort-row">
+            <button class="active" data-sort="balance">Lowest balance</button>
+            <button data-sort="name">Name A–Z</button>
+          </div>
+          <div class="league">
+            <div class="league-head">
+              <span>#</span><span>Player</span><span id="lh-mid">Last 5</span><span id="lh-bal">Balance</span>
+            </div>
+            <div id="roster-list">
+              <div class="sk-member" aria-hidden="true"><span class="sk" style="width:14px"></span><span class="sk w60"></span><span class="sk w80" style="justify-self:end"></span></div>
+              <div class="sk-member" aria-hidden="true"><span class="sk" style="width:14px"></span><span class="sk w45"></span><span class="sk w60" style="justify-self:end"></span></div>
+              <div class="sk-member" aria-hidden="true"><span class="sk" style="width:14px"></span><span class="sk w60"></span><span class="sk w80" style="justify-self:end"></span></div>
+              <div class="sk-member" aria-hidden="true"><span class="sk" style="width:14px"></span><span class="sk w45"></span><span class="sk w60" style="justify-self:end"></span></div>
+              <div class="sk-member" aria-hidden="true"><span class="sk" style="width:14px"></span><span class="sk w60"></span><span class="sk w80" style="justify-self:end"></span></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <nav class="tabbar">
+        <button class="active" data-tab="games">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+          Fixtures
+        </button>
+        <button data-tab="wallet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 14h2.5"/></svg>
+          Wallet
+        </button>
+        <button data-tab="group">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c.8-3.4 3.3-5.3 6.5-5.3s5.7 1.9 6.5 5.3"/><circle cx="17.5" cy="9" r="2.5"/><path d="M15.8 13.9c2.3.3 4 1.9 4.6 4.7"/></svg>
+          Table
+        </button>
+        <button data-tab="admin" id="admin-tab-btn" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          Organiser
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <script>
+    /* Boot safety net (plain script, so it works even if the modules fail to
+       load). If startup throws, or hasn't finished after 12s, show a visible
+       error with Reload / Reset instead of skeletons forever. */
+    (function () {
+      var main = document.querySelector("main");
+      var booting = function () { return main.getAttribute("aria-busy") === "true"; };
+      var fail = function (why) {
+        if (!booting() || !document.getElementById("boot-error").hidden) return;
+        console.error("[boot] startup failed:", why);
+        main.classList.add("boot-failed");
+        document.getElementById("boot-error").hidden = false;
+      };
+      window.addEventListener("error", function (e) { fail(e.message || e); });
+      window.addEventListener("unhandledrejection", function (e) { fail(e.reason); });
+      setTimeout(function () { if (booting()) fail("timed out"); }, 12000);
+      document.getElementById("boot-reload").onclick = function () { location.reload(); };
+      document.getElementById("boot-reset").onclick = function () {
+        if (!confirm("Erase everything this app saved on this device (login, PINs, bookings, organiser changes) and start fresh?")) return;
+        try { Object.keys(localStorage).filter(function (k) { return k.indexOf("fcfc_") === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+        location.href = location.pathname;
+      };
+    })();
+  </script>
+  <script type="module" src="./src/js/app.js?v=2026-09-30.9"></script>
+</body>
+</html>

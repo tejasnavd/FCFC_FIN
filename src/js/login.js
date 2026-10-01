@@ -1,0 +1,140 @@
+// Login screen: pick your name -> (PIN if this name is registered on this
+// device) -> in. First-time names log straight in, then get offered a PIN.
+// A single-device simulation; the copy says so wherever a PIN appears.
+import { esc, colorFor, initials } from "./utils.js";
+import { effectiveRoster } from "./admin-store.js";
+import { login, hasPin, setPin, checkPin, validPin, sessionName } from "./auth.js";
+
+let step = "pick";          // "pick" | "pin" | "setup"
+let picked = null;
+let query = "";
+let error = "";
+let tries = 0;
+let lockedUntil = 0;
+
+// While the PIN-setup step is showing, keep the login screen up even though
+// a session already exists.
+export const setupPending = () => step === "setup";
+
+const members = () => effectiveRoster().filter(r => r[3].kind !== "guest").map(r => r[0]).sort((a, b) => a.localeCompare(b));
+const avatar = (n, cls = "m-av") => `<span class="${cls}" style="background:${colorFor(n)}" aria-hidden="true">${initials(n)}</span>`;
+const SIM_NOTE = `This is a simulation for now: names and PINs are saved in this browser only. Other phones don't check them yet, so it isn't real security.`;
+
+function listHtml() {
+  const q = query.trim().toLowerCase();
+  const names = members().filter(n => n.toLowerCase().includes(q));
+  return names.length
+    ? names.map(n => `<li><button type="button" class="login-name" data-pick="${esc(n)}">${avatar(n)}<span class="ln-name">${esc(n)}</span>${hasPin(n) ? `<span class="tag">PIN set</span>` : ""}</button></li>`).join("")
+    : `<li class="login-empty">No member called “${esc(query)}”. Guests can't log in; they book through a member.</li>`;
+}
+
+function pickHtml() {
+  return `
+    <div class="card-block login-card">
+      <h2 class="login-title" id="login-title">Who's playing?</h2>
+      <p class="login-sub">Pick your name from the club list.</p>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="login-search" placeholder="Search your name…" autocomplete="off" aria-label="Search your name" value="${esc(query)}">
+      </div>
+      <ul class="login-list" id="login-list">${listHtml()}</ul>
+    </div>
+    <p class="login-foot">Only club members can log in. ${SIM_NOTE}</p>`;
+}
+
+function pinHtml() {
+  const locked = Date.now() < lockedUntil;
+  return `
+    <div class="card-block login-card">
+      <button type="button" class="link-btn" data-back>Not ${esc(picked)}? Pick another name</button>
+      <div class="login-who">${avatar(picked, "avatar-lg")}<div><h2 class="login-title" id="login-title">${esc(picked)}</h2><div class="login-sub">This name has a PIN on this device.</div></div></div>
+      <form id="pin-form" class="pin-form" novalidate>
+        <input type="text" name="username" value="${esc(picked)}" autocomplete="username" hidden>
+        <label class="field-l">Enter your 4-digit PIN
+          <input class="pin-in" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="4" pattern="[0-9]{4}" ${locked ? "disabled" : ""}>
+        </label>
+        <p class="login-err" role="alert">${esc(error)}</p>
+        <button type="submit" class="pay-btn" ${locked ? "disabled" : ""}>Log in</button>
+      </form>
+    </div>
+    <p class="login-foot">Forgot it? The organiser can reset it from the Organiser tab. ${SIM_NOTE}</p>`;
+}
+
+function setupHtml() {
+  return `
+    <div class="card-block login-card">
+      <div class="login-who">${avatar(picked, "avatar-lg")}<div><h2 class="login-title" id="login-title">You're in, ${esc(picked)}</h2><div class="login-sub">This device will stay logged in as you.</div></div></div>
+      <form id="setup-form" class="pin-form" novalidate>
+        <input type="text" name="username" value="${esc(picked)}" autocomplete="username" hidden>
+        <p class="login-text">Set a 4-digit PIN in case you log in with this name on a new device later.</p>
+        <div class="pin-pair">
+          <label class="field-l">New PIN<input class="pin-in" name="pin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" pattern="[0-9]{4}"></label>
+          <label class="field-l">Type it again<input class="pin-in" name="pin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" pattern="[0-9]{4}"></label>
+        </div>
+        <p class="login-err" role="alert">${esc(error)}</p>
+        <button type="submit" class="pay-btn">Save PIN</button>
+        <button type="button" class="link-btn skip" data-skip>Skip for now</button>
+      </form>
+      <div class="sim-note">
+        <strong>Not real security yet.</strong>
+        The PIN is saved in this browser only. It's only checked when someone picks ${esc(picked)} again on this device. Other phones and browsers don't know about it until the club has a proper server.
+      </div>
+    </div>`;
+}
+
+export function renderLogin() {
+  const el = document.getElementById("login-body");
+  el.innerHTML = step === "pin" ? pinHtml() : step === "setup" ? setupHtml() : pickHtml();
+  const first = el.querySelector(step === "pick" ? "#login-search" : ".pin-in:not([disabled])");
+  if (first && step !== "pick") first.focus({ preventScroll: true });
+}
+
+// A new session always starts from the name picker.
+export function resetLogin() { step = "pick"; picked = null; error = ""; query = ""; tries = 0; }
+
+export function initLogin() {
+  const el = document.getElementById("login-body");
+  el.addEventListener("input", e => {
+    if (e.target.id === "login-search") { query = e.target.value; document.getElementById("login-list").innerHTML = listHtml(); }
+    if (e.target.classList.contains("pin-in")) e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4);
+  });
+  el.addEventListener("click", e => {
+    const pick = e.target.closest("[data-pick]");
+    if (pick) {
+      picked = pick.dataset.pick;
+      error = ""; tries = 0;
+      if (hasPin(picked)) { step = "pin"; renderLogin(); }
+      else { step = "setup"; login(picked); }          // unclaimed name: free login, then offer a PIN
+      return;
+    }
+    if (e.target.closest("[data-back]")) { resetLogin(); renderLogin(); return; }
+    if (e.target.closest("[data-skip]")) { step = "pick"; error = ""; login(sessionName()); }
+  });
+  el.addEventListener("submit", async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    if (e.target.id === "pin-form") {
+      const pin = String(fd.get("pin") || "");
+      if (!validPin(pin)) { error = "Enter all 4 digits."; renderLogin(); return; }
+      if (await checkPin(picked, pin)) { error = ""; step = "pick"; login(picked); return; }
+      tries += 1;
+      if (tries >= 5) { lockedUntil = Date.now() + 30000; tries = 0; error = "Too many wrong PINs. Try again in 30 seconds."; setTimeout(renderLogin, 30000); }
+      else error = `That PIN doesn't match. ${5 - tries} ${5 - tries === 1 ? "try" : "tries"} left.`;
+      renderLogin();
+    } else if (e.target.id === "setup-form") {
+      const pin = String(fd.get("pin") || ""), pin2 = String(fd.get("pin2") || "");
+      if (!validPin(pin)) { error = "Use exactly 4 digits."; renderLogin(); return; }
+      if (pin !== pin2) { error = "Those two PINs don't match."; renderLogin(); return; }
+      await setPin(picked, pin);
+      error = ""; step = "pick";
+      login(picked);                                     // re-emit so the app appears
+    }
+  });
+}
+
+// dev/screenshot convenience: ?login=Name|pin|setup previews a step
+export function previewStep(name, which) {
+  if (!name) return;
+  picked = name;
+  step = which === "setup" ? "setup" : which === "pin" ? "pin" : "pick";
+}
