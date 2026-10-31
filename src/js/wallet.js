@@ -195,8 +195,33 @@ export function initWalletControls() {
   });
 
   document.getElementById("pay-btn").addEventListener("click", () => {
-    // Placeholder until a real UPI deep link / payment backend is wired in.
-    console.log(`[wallet] would initiate UPI payment of ₹${amount()}`);
+    const u = me();
+    const amt = amount();
+    if (!D || !u || !amt) return;
+    const params = new URLSearchParams({
+      pa: D.upiId,
+      pn: "FCFC",
+      am: String(amt),
+      cu: "INR",
+      tn: `FCFC topup ${u.name}`,
+    });
+    const generic = `upi://pay?${params.toString()}`;
+    // Android: force the chooser straight to Google Pay's package instead of
+    // showing every UPI app. iOS: Google Pay's own documented custom scheme.
+    // Either way, if GPay isn't installed the link silently fails to open,
+    // so fall back to the generic upi:// link (whatever app is there) after
+    // a beat — cancelled if the page actually backgrounds, which means GPay
+    // did open. There's still no success callback either way: "I've paid" +
+    // organiser confirm (below) is still how the wallet actually credits.
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const gpay = isAndroid
+      ? `intent://pay?${params.toString()}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`
+      : `gpay://upi/pay?${params.toString()}`;
+    const fallback = setTimeout(() => { location.href = generic; }, 1500);
+    const cancel = () => clearTimeout(fallback);
+    document.addEventListener("visibilitychange", cancel, { once: true });
+    window.addEventListener("pagehide", cancel, { once: true });
+    location.href = gpay;
   });
 
   const extras = document.getElementById("extras");
